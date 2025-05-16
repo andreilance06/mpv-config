@@ -5,6 +5,8 @@ local State = require("lib/state")
 
 local Client = {}
 
+local unpack = table.unpack or unpack
+
 function Client.start()
   if State.client_running then
     return true
@@ -19,8 +21,8 @@ function Client.start()
   local cmd = mp.command_native({
     name = "subprocess",
     playback_only = false,
-    capture_stderr = true,
-    args = { mp.get_script_directory() .. "/libtorrent_mpv.exe", table.unpack(Config.get_client_args()) },
+    capture_stderr = false,
+    args = { mp.get_script_directory() .. "/libtorrent_mpv", unpack(Config.get_client_args()) },
     detach = true
   })
 

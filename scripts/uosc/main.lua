@@ -1,7 +1,9 @@
 --[[ uosc | https://github.com/tomasklaen/uosc ]]
-local uosc_version = '5.7.0'
+local uosc_version = '5.8.0'
 
 mp.commandv('script-message', 'uosc-version', uosc_version)
+
+mp.set_property('osc', 'no')
 
 assdraw = require('mp.assdraw')
 opt = require('mp.options')
@@ -381,6 +383,7 @@ state = {
 	time_human = nil, -- current playback time in human format
 	destination_time_human = nil, -- depends on options.destination_time
 	pause = mp.get_property_native('pause'),
+	ime_active = mp.get_property_native("input-ime"),
 	chapters = {},
 	---@type {index: number; title: string}|nil
 	current_chapter = nil,
@@ -667,7 +670,6 @@ if options.click_threshold > 0 then
 	end
 end
 
-mp.observe_property('osc', 'bool', function(name, value) if value == true then mp.set_property('osc', 'no') end end)
 mp.register_event('file-loaded', function()
 	local path = normalize_path(mp.get_property_native('path'))
 	itable_delete_value(state.history, path)
