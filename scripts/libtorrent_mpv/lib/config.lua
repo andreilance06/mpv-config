@@ -5,8 +5,9 @@ local Config = {
   opts = {
     address = "0.0.0.0",
     port = 1337,
-    ["save-path"] = os.getenv("tmp") or os.getenv("temp") or os.getenv("tmpdir") or os.getenv("tempdir") or os.getenv("TMP") or os.getenv("TEMP") or os.getenv("TMPDIR") or os.getenv("TEMPDIR") or "/tmp",
+    ["save-path"] = PLATFORM == "windows" and os.getenv("tmp") or PLATFORM == "linux" and "/tmp",
     StartClientOnMpvLaunch = true,
+    SearchLocalNetwork = true
     -- CloseClientOnMpvExit = true,
     -- CloseClientOnNoTorrentFiles = false
   }
@@ -41,6 +42,7 @@ function Config.save_opts()
     for i, v in pairs(Config.opts) do
       handle:write(string.format("%s=%s\n", i, lua_to_mpv(v)))
     end
+    handle:close()
   else
     msg.error("error saving script config")
     return false

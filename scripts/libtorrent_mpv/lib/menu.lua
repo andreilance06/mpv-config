@@ -29,6 +29,15 @@ function Menu.get_item(menu_id, index)
   return items[index]
 end
 
+function Menu.generate_playlist(files)
+  local playlist = { "#EXTM3U" }
+  for _, file in pairs(files) do
+    playlist[#playlist + 1] = "#EXTINF:0," .. file.Name
+    playlist[#playlist + 1] = "http://" .. State.service_ip .. ":" .. State.service_port .. "/torrents/" .. file.Path
+  end
+  return table.concat(playlist, "\n")
+end
+
 function Menu.create_torrent_menu(menu_id, index)
   Menu.root_items = {}
   Menu.item_callbacks = {}
@@ -37,22 +46,43 @@ function Menu.create_torrent_menu(menu_id, index)
 
   -- Add client control items
   local client_control_items = {}
-  table.insert(client_control_items, Menu.new_prop({
-    title = State.client_running and "Stop Client" or "Start Client",
-    icon = State.client_running and "stop" or "play_arrow",
-    value = State.client_running and "client_stop" or "client_start"
-  }, function(event)
-    local item, done = Menu.update(event.menu_id, event.index)
-    item.value = "noop"
-    item.icon = "spinner"
-    done()
-    if event.value == "client_start" then
-      Client.start()
-    elseif event.value == "client_stop" then
-      Client.close()
+  if State.client_running then
+    if State.launched_by_us then
+      table.insert(client_control_items, Menu.new_prop({
+        title = "Stop Client",
+        icon = "stop",
+        value = "client_stop"
+      }, function(event)
+        local item, done = Menu.update(event.menu_id, event.index)
+        item.value = "noop"
+        item.icon = "spinner"
+        done()
+        if event.value == "client_stop" then
+          Client.close()
+        end
+        mp.add_timeout(0.75, Menu.update)
+      end))
+    else
+      table.insert(client_control_items, Menu.new_prop({
+        title = "Host: " .. State.service_ip .. ':' .. State.service_port
+      }))
     end
-    Menu.update()
-  end))
+  else
+    table.insert(client_control_items, Menu.new_prop({
+      title = "Start Client",
+      icon = "play_arrow",
+      value = "client_start"
+    }, function(event)
+      local item, done = Menu.update(event.menu_id, event.index)
+      item.value = "noop"
+      item.icon = "spinner"
+      done()
+      if event.value == "client_start" then
+        Client.start()
+      end
+      mp.add_timeout(0.75, Menu.update)
+    end))
+  end
 
   table.insert(client_control_items, Menu.new_prop({
     title = "Launch torrent client on mpv start",
@@ -63,6 +93,20 @@ function Menu.create_torrent_menu(menu_id, index)
       Config.opts.StartClientOnMpvLaunch = false
     elseif event.value == "toggle_on" then
       Config.opts.StartClientOnMpvLaunch = true
+    end
+    Menu.update()
+    Config.save_opts()
+  end))
+
+  table.insert(client_control_items, Menu.new_prop({
+    title = "Search for torrent client on network",
+    icon = Config.opts.SearchLocalNetwork and "check_box" or "check_box_outline_blank",
+    value = Config.opts.SearchLocalNetwork and "toggle_off" or "toggle_on"
+  }, function(event)
+    if event.value == "toggle_off" then
+      Config.opts.SearchLocalNetwork = false
+    elseif event.value == "toggle_on" then
+      Config.opts.SearchLocalNetwork = true
     end
     Menu.update()
     Config.save_opts()
@@ -124,17 +168,17 @@ function Menu.create_torrent_menu(menu_id, index)
       if #media_files > 1 then
         table.insert(play_torrent_items, Menu.new_prop({
           title = "Play all",
-          value = v.Playlist,
+          value = "memory://" .. Menu.generate_playlist(media_files),
           actions = {
             { name = "play_all",        icon = "playlist_play", label = "Play all files" },
             { name = "play_all_append", icon = "playlist_add",  label = "Append all files to playlist" }
           }
         }, function(event)
           if event.action == "play_all" then
-            mp.commandv("loadfile", "memory://" .. event.value)
+            mp.commandv("loadlist", event.value)
             mp.commandv("script-message-to", "uosc", "close-menu", "torrent_menu")
           elseif event.action == "play_all_append" then
-            mp.commandv("loadfile", "memory://" .. event.value, "append")
+            mp.commandv("loadlist", event.value, "append")
             local item, done = Menu.update(event.menu_id, event.index)
             item.actions[2].name = "noop"
             item.actions[2].icon = "check"
@@ -147,11 +191,12 @@ function Menu.create_torrent_menu(menu_id, index)
       end
 
       for _, file in pairs(media_files) do
+        local URL = "http://" .. State.service_port .. ":" .. State.service_port .. "/torrents/" .. file.Path
         table.insert(play_torrent_items, Menu.new_prop({
           title = file.Name,
           hint = string.format("%.1f MB", file.Length / (1024 * 1024)),
-          active = mp.get_property("stream-open-filename", "") == file.URL and true or false,
-          value = file.URL,
+          active = URL == mp.get_property("stream-open-filename", ""),
+          value = "memory://" .. Menu.generate_playlist({ file }),
           actions = {
             { name = "play_file",   icon = "play_circle_outline", label = "Play file" },
             { name = "play_append", icon = "add_to_queue",        label = "Queue" },
@@ -159,10 +204,10 @@ function Menu.create_torrent_menu(menu_id, index)
           }
         }, function(event)
           if event.action == "play_file" then
-            mp.commandv("loadfile", event.value)
+            mp.commandv("loadlist", event.value)
             mp.commandv("script-message-to", "uosc", "close-menu", "torrent_menu")
           elseif event.action == "play_append" then
-            mp.commandv("loadfile", event.value, "append")
+            mp.commandv("loadlist", event.value, "append")
             local item, done = Menu.update(event.menu_id, event.index)
             item.actions[2].name = "noop"
             item.actions[2].icon = "check"
@@ -171,7 +216,7 @@ function Menu.create_torrent_menu(menu_id, index)
               Menu.update()
             end)
           elseif event.action == "play_next" then
-            mp.commandv("loadfile", event.value, "insert-next")
+            mp.commandv("loadlist", event.value, "insert-next")
             local item, done = Menu.update(event.menu_id, event.index)
             item.actions[3].name = "noop"
             item.actions[3].icon = "check"

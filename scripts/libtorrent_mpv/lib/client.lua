@@ -5,24 +5,18 @@ local State = require("lib/state")
 
 local Client = {}
 
-local unpack = table.unpack or unpack
+local unpack = unpack or table.unpack -- For compatibility with Lua 5.1
 
 function Client.start()
   if State.client_running then
     return true
   end
 
-  if State.is_running() then
-    msg.debug("Client is already running")
-    State.client_running = true
-    return true
-  end
-
   local cmd = mp.command_native({
     name = "subprocess",
     playback_only = false,
-    capture_stderr = false,
-    args = { mp.get_script_directory() .. "/libtorrent_mpv", unpack(Config.get_client_args()) },
+    -- capture_stderr = true,
+    args = { mp.get_script_directory() .. '/' .. "libtorrent_mpv" .. BINARY_SUFFIX, unpack(Config.get_client_args()) },
     detach = true
   })
 
@@ -33,7 +27,8 @@ function Client.start()
 
   msg.debug("Started torrent server")
   State.client_running = true
-  -- State.launched_by_us = true
+  State.launched_by_us = true
+  State.find_service()
   return true
 end
 
@@ -42,15 +37,17 @@ function Client.close()
     msg.debug("Client is already closed")
     return true
   end
-  -- if not State.launched_by_us then
-  --   msg.debug("Can't close client launched by another process")
-  --   return false
-  -- end
+
+  if not State.launched_by_us then
+    msg.debug("Can't close client not launched by us")
+    return false
+  end
+
   local cmd = mp.command_native({
     name = "subprocess",
     playback_only = false,
     capture_stderr = true,
-    args = { "curl", "127.0.0.1:" .. Config.opts.port .. "/shutdown" }
+    args = { "curl", "http://" .. State.service_ip .. ':' .. State.service_port .. "/shutdown" }
   })
 
   if cmd.status ~= 0 then
@@ -59,7 +56,7 @@ function Client.close()
   end
 
   State.client_running = false
-  -- State.launched_by_us = false
+  State.launched_by_us = false
   State.torrents = {}
   msg.debug("Closed torrent server")
   return true
@@ -74,17 +71,15 @@ function Client.add(torrent_url)
   local cmd = mp.command_native({
     name = "subprocess",
     capture_stdout = true,
-    args = { "curl", "-s", "-f", "--retry", "10", "--retry-delay", "1", "--retry-connrefused", "-d",
-      torrent_url, "127.0.0.1:" .. Config.opts.port .. "/torrents" }
+    args = { "curl", "-s", "-f", "-d",
+      torrent_url, "http://" .. State.service_ip .. ':' .. State.service_port .. "/torrents" }
   })
 
-  local playlist = cmd.stdout
-  if cmd.status ~= 0 or not playlist or #playlist == 0 then
+  if cmd.status ~= 0 or not cmd.stdout or #cmd.stdout == 0 then
     msg.debug("Unable to get playlist for", torrent_url)
-    return nil
   end
 
-  return playlist
+  return cmd.stdout
 end
 
 function Client.remove(info_hash, delete_files)
@@ -113,10 +108,10 @@ function Client.remove(info_hash, delete_files)
   local cmd = mp.command_native({
     name = "subprocess",
     playback_only = false,
-    args = { "curl", "-X", "DELETE", "127.0.0.1:" .. Config.opts.port .. "/torrents/" .. info_hash .. "?DeleteFiles=" .. tostring(delete_files) },
+    args = { "curl", "-X", "DELETE", "http://" .. State.service_ip .. ':' .. State.service_port .. "/torrents/" .. info_hash .. "?DeleteFiles=" .. tostring(delete_files) },
   })
 
-  return cmd.status ~= 0
+  return cmd.status == 0
 end
 
 return Client
